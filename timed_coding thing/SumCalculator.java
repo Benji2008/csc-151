@@ -2,9 +2,13 @@ import javax.swing.*;
 import javax.swing.border.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.font.FontRenderContext;
+import java.awt.font.TextLayout;
 import java.awt.geom.*;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.function.Function;
 
 /**
@@ -25,18 +29,25 @@ import java.util.function.Function;
  */
 public class SumCalculator extends JFrame {
 
-    // ── Palette ────────────────────────────────────────────────────────────────
-    private static final Color BG       = new Color(13,  17,  30);
-    private static final Color BG2      = new Color(18,  24,  45);
-    private static final Color CARD     = new Color(24,  30,  50);
-    private static final Color ACCENT   = new Color(99, 179, 237);
-    private static final Color ACCENT2  = new Color(129, 140, 248);
-    private static final Color TEXT     = new Color(226, 232, 240);
-    private static final Color MUTED    = new Color(140, 152, 178);
-    private static final Color SUCCESS  = new Color(52,  211, 153);
-    private static final Color DANGER   = new Color(239, 68,  68);
-    private static final Color FIELD_BG = new Color(30,  38,  60);
-    private static final Color FIELD_BD = new Color(51,  65, 100);
+    // ── Palette (manga: cream paper, black ink, splash red) ───────────────────
+    private static final Color BG         = new Color(245, 241, 232);  // cream paper
+    private static final Color BG2        = new Color(0,   0,   0, 36); // halftone dots
+    private static final Color CARD       = new Color(255, 255, 255);  // white panel
+    private static final Color ACCENT     = new Color(0,   0,   0);    // pure black
+    private static final Color ACCENT2    = new Color(60,  60,  60);   // dark gray
+    private static final Color TEXT       = new Color(15,  15,  15);   // near-black
+    private static final Color MUTED      = new Color(120, 120, 120);  // mid gray
+    private static final Color SUCCESS    = new Color(15,  15,  15);   // black (no neon green)
+    private static final Color DANGER     = new Color(200, 20,  20);   // splash red
+    private static final Color FIELD_BG   = new Color(250, 248, 242);  // very light cream
+    private static final Color FIELD_BD   = new Color(0,   0,   0);    // black border
+    private static final Color INK        = new Color(0,   0,   0);    // pure ink
+    private static final Color BURST_FILL = new Color(255, 255, 255);  // white burst
+    private static final Color BURST_TEXT = new Color(0,   0,   0);    // black "BAM!"
+    private static final Color HOVER_LIGHT = new Color(225, 222, 213); // hover on cream surfaces
+    private static final Color PRESS_LIGHT = new Color(195, 192, 184); // press on cream surfaces
+    private static final Color HOVER_DARK  = new Color(50,  50,  50);  // hover on black surfaces
+    private static final Color PRESS_DARK  = new Color(35,  35,  35);  // press on black surfaces
 
     // ── Comic-book font (with fallbacks) ───────────────────────────────────────
     private static final String COMIC_FONT = pickComicFont();
@@ -73,6 +84,7 @@ public class SumCalculator extends JFrame {
     private JTextField nameField;
     private JLabel thankNameLabel;
     private JLabel thankSumLabel;
+    private final ComicBurst burst = new ComicBurst();
 
     // Track every component that has a font we want to scale
     private final List<ScaledFont> scaledFonts = new ArrayList<>();
@@ -167,6 +179,8 @@ public class SumCalculator extends JFrame {
         root.add(thankPanel,    "THANK");
 
         add(root);
+        setGlassPane(burst);
+        burst.setVisible(false);
         cardLayout.show(root, "WELCOME");
         installKeybindings();
         setVisible(true);
@@ -294,6 +308,7 @@ public class SumCalculator extends JFrame {
         userName = name;
         cardLayout.show(root, "MENU");
         rebuildMenuGreeting();
+        burst.popHere("WOW!");
     }
 
     private JLabel menuGreeting;
@@ -364,12 +379,13 @@ public class SumCalculator extends JFrame {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                                     RenderingHints.VALUE_ANTIALIAS_ON);
                 Color base = FIELD_BG;
-                if (getModel().isPressed())       base = FIELD_BD;
-                else if (getModel().isRollover()) base = FIELD_BG.brighter();
+                if (getModel().isPressed())       base = PRESS_LIGHT;
+                else if (getModel().isRollover()) base = HOVER_LIGHT;
                 g2.setColor(base);
                 g2.fill(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 14, 14));
-                g2.setColor(getModel().isRollover() ? ACCENT : FIELD_BD);
-                g2.setStroke(new BasicStroke(1.5f));
+                g2.setColor(INK);
+                g2.setStroke(new BasicStroke(getModel().isRollover() ? 3f : 2f,
+                                             BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                 g2.draw(new RoundRectangle2D.Float(1, 1, getWidth()-2, getHeight()-2, 14, 14));
                 g2.dispose();
                 super.paintComponent(g);
@@ -402,7 +418,12 @@ public class SumCalculator extends JFrame {
         txt.add(desc);
         b.add(sym, BorderLayout.WEST);
         b.add(txt, BorderLayout.CENTER);
-        b.addActionListener(e -> openCalc(op));
+        b.addActionListener(e -> {
+            Point p = burst.isShowing()
+                ? SwingUtilities.convertPoint(b, b.getWidth()/2, b.getHeight()/2, burst)
+                : new Point(getWidth()/2, getHeight()/2);
+            burst.mangaPanelZoom(p, () -> openCalc(op));
+        });
         return b;
     }
 
@@ -438,11 +459,13 @@ public class SumCalculator extends JFrame {
         formula.setAlignmentX(CENTER_ALIGNMENT);
 
         JLabel desc = makeLabel(
-            "<html><body style='text-align:center; width:380px'>"
+            "<html><body style='text-align:center; width:360px'>"
                 + op.description + "</body></html>",
             13, TEXT);
-        desc.setAlignmentX(CENTER_ALIGNMENT);
         desc.setHorizontalAlignment(SwingConstants.CENTER);
+        SpeechBubble bubble = new SpeechBubble(desc);
+        bubble.setAlignmentX(CENTER_ALIGNMENT);
+        bubble.setMaximumSize(new Dimension(440, 110));
 
         JLabel hello = makeLabel("Hi " + userName + " — fill in the values:", 12, MUTED);
         hello.setAlignmentX(CENTER_ALIGNMENT);
@@ -452,11 +475,11 @@ public class SumCalculator extends JFrame {
         card.add(title);
         card.add(vgap(6));
         card.add(formula);
-        card.add(vgap(8));
-        card.add(desc);
-        card.add(vgap(6));
+        card.add(vgap(10));
+        card.add(bubble);
+        card.add(vgap(2));
         card.add(hello);
-        card.add(vgap(22));
+        card.add(vgap(20));
 
         // Build input grid that matches the formula
         int n = op.inputLabels.length;
@@ -484,15 +507,17 @@ public class SumCalculator extends JFrame {
         card.add(grid);
         card.add(vgap(22));
 
-        JLabel result = makeLabel("Result will appear here", 14, MUTED);
-        result.setAlignmentX(CENTER_ALIGNMENT);
+        JLabel result = makeLabel("Result will appear here", 18, MUTED);
         result.setHorizontalAlignment(SwingConstants.CENTER);
-        card.add(result);
-        card.add(vgap(20));
+        SpeechBubble resultBubble = new SpeechBubble(result);
+        resultBubble.setAlignmentX(CENTER_ALIGNMENT);
+        resultBubble.setMaximumSize(new Dimension(460, 90));
+        card.add(resultBubble);
+        card.add(vgap(18));
 
         JButton calcBtn  = makePrimaryButton("Calculate");
         JButton clearBtn = makeSecondaryButton("Clear");
-        calcBtn.addActionListener(e -> doCompute(op, fields, result));
+        calcBtn.addActionListener(e -> doCompute(op, fields, result, resultBubble));
         clearBtn.addActionListener(e -> {
             for (JTextField f : fields) {
                 f.setText("");
@@ -505,7 +530,7 @@ public class SumCalculator extends JFrame {
 
         // Enter on the last field calculates
         fields[fields.length - 1].addActionListener(
-            e -> doCompute(op, fields, result));
+            e -> doCompute(op, fields, result, resultBubble));
 
         JPanel row = new JPanel(new GridLayout(1, 2, 14, 0));
         row.setOpaque(false);
@@ -549,7 +574,8 @@ public class SumCalculator extends JFrame {
         return v;
     }
 
-    private void doCompute(Operation op, JTextField[] fields, JLabel result) {
+    private void doCompute(Operation op, JTextField[] fields,
+                           JLabel result, JComponent burstTarget) {
         boolean parseError = false;
         for (JTextField f : fields) {
             try {
@@ -572,6 +598,7 @@ public class SumCalculator extends JFrame {
             lastOpName = op.name;
             result.setForeground(SUCCESS);
             result.setText(op.name + "  =  " + format(answer));
+            burst.popOver(burstTarget);
         } catch (ArithmeticException ex) {
             result.setForeground(DANGER);
             result.setText("⚠  " + ex.getMessage());
@@ -591,6 +618,7 @@ public class SumCalculator extends JFrame {
         thankNameLabel.setText("Thank you, " + userName + "!");
         thankSumLabel.setText(op.name + "  =  " + format(lastResult));
         cardLayout.show(root, "THANK");
+        burst.popHere("BYE!");
     }
 
     private void goToThankWithoutResult() {
@@ -599,6 +627,7 @@ public class SumCalculator extends JFrame {
                 ? "Come back anytime."
                 : "Last result — " + lastOpName + " = " + format(lastResult));
         cardLayout.show(root, "THANK");
+        burst.popHere("BYE!");
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -612,7 +641,7 @@ public class SumCalculator extends JFrame {
         card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
         card.setBorder(new EmptyBorder(52, 42, 52, 42));
 
-        JLabel icon = makeLabel("🎉", 60, SUCCESS);
+        JLabel icon = makeLabel("完", 64, INK);
         icon.setAlignmentX(CENTER_ALIGNMENT);
 
         thankNameLabel = makeLabel("Thank you!", 30, TEXT);
@@ -695,9 +724,10 @@ public class SumCalculator extends JFrame {
                                     RenderingHints.VALUE_ANTIALIAS_ON);
                 g2.setColor(CARD);
                 g2.fill(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 24, 24));
-                g2.setColor(FIELD_BD);
-                g2.setStroke(new BasicStroke(1.5f));
-                g2.draw(new RoundRectangle2D.Float(1, 1, getWidth()-2, getHeight()-2, 24, 24));
+                // inky comic-panel outline
+                g2.setColor(INK);
+                g2.setStroke(new BasicStroke(3.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.draw(new RoundRectangle2D.Float(2, 2, getWidth()-4, getHeight()-4, 24, 24));
                 g2.dispose();
             }
         };
@@ -765,16 +795,19 @@ public class SumCalculator extends JFrame {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                                     RenderingHints.VALUE_ANTIALIAS_ON);
                 Color base = getBackground();
-                if (getModel().isPressed())       g2.setColor(base.darker());
-                else if (getModel().isRollover()) g2.setColor(base.brighter());
+                if (getModel().isPressed())       g2.setColor(PRESS_DARK);
+                else if (getModel().isRollover()) g2.setColor(HOVER_DARK);
                 else                              g2.setColor(base);
-                g2.fill(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 12, 12));
+                g2.fill(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 14, 14));
+                g2.setColor(INK);
+                g2.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.draw(new RoundRectangle2D.Float(1.5f, 1.5f, getWidth()-3f, getHeight()-3f, 14, 14));
                 g2.dispose();
                 super.paintComponent(g);
             }
         };
         btn.setBackground(ACCENT);
-        btn.setForeground(BG);
+        btn.setForeground(Color.WHITE);
         btn.setFont(new Font(COMIC_FONT, Font.BOLD, 14));
         registerScaled(btn, 14, Font.BOLD);
         btn.setFocusPainted(false);
@@ -793,13 +826,13 @@ public class SumCalculator extends JFrame {
                 Graphics2D g2 = (Graphics2D) g.create();
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                                     RenderingHints.VALUE_ANTIALIAS_ON);
-                if (getModel().isPressed())        g2.setColor(FIELD_BD.darker());
-                else if (getModel().isRollover())  g2.setColor(FIELD_BD.brighter());
+                if (getModel().isPressed())        g2.setColor(PRESS_LIGHT);
+                else if (getModel().isRollover())  g2.setColor(HOVER_LIGHT);
                 else                               g2.setColor(FIELD_BG);
-                g2.fill(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 12, 12));
-                g2.setColor(FIELD_BD);
-                g2.setStroke(new BasicStroke(1.5f));
-                g2.draw(new RoundRectangle2D.Float(1, 1, getWidth()-2, getHeight()-2, 12, 12));
+                g2.fill(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 14, 14));
+                g2.setColor(INK);
+                g2.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.draw(new RoundRectangle2D.Float(1.5f, 1.5f, getWidth()-3f, getHeight()-3f, 14, 14));
                 g2.dispose();
                 super.paintComponent(g);
             }
@@ -855,16 +888,312 @@ public class SumCalculator extends JFrame {
     // ══════════════════════════════════════════════════════════════════════════
     //  INNER CLASSES
     // ══════════════════════════════════════════════════════════════════════════
-    static class GradientPanel extends JPanel {
-        private final Color top, bottom;
-        GradientPanel(Color top, Color bottom) {
-            this.top = top; this.bottom = bottom;
-            setOpaque(true);
+
+    /** Manga-style speech bubble: white fill, ink outline, little tail. */
+    static class SpeechBubble extends JPanel {
+        SpeechBubble(JComponent content) {
+            setOpaque(false);
+            setLayout(new BorderLayout());
+            setBorder(new EmptyBorder(14, 22, 26, 22));  // extra bottom space for tail
+            add(content, BorderLayout.CENTER);
         }
         @Override protected void paintComponent(Graphics g) {
-            Graphics2D g2 = (Graphics2D) g;
-            g2.setPaint(new GradientPaint(0, 0, top, 0, getHeight(), bottom));
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                                RenderingHints.VALUE_ANTIALIAS_ON);
+            int w = getWidth(), h = getHeight();
+            int tailH = 12;
+            int bodyH = h - tailH;
+            int r = 18;
+
+            // Bubble outline traced as a single closed path (so the stroke joins cleanly).
+            Path2D path = new Path2D.Double();
+            path.moveTo(r, 0);
+            path.lineTo(w - r, 0);
+            path.quadTo(w - 1, 0, w - 1, r);
+            path.lineTo(w - 1, bodyH - r);
+            path.quadTo(w - 1, bodyH, w - r, bodyH);
+            // Walk along the bottom edge, dropping the little tail near the left third.
+            int tailLeft  = w / 4;
+            int tailRight = tailLeft + 22;
+            int tailTipX  = tailLeft + 4;
+            path.lineTo(tailRight, bodyH);
+            path.lineTo(tailTipX,  h - 1);
+            path.lineTo(tailLeft,  bodyH);
+            path.lineTo(r, bodyH);
+            path.quadTo(0, bodyH, 0, bodyH - r);
+            path.lineTo(0, r);
+            path.quadTo(0, 0, r, 0);
+            path.closePath();
+
+            g2.setColor(Color.WHITE);
+            g2.fill(path);
+            g2.setColor(INK);
+            g2.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.draw(path);
+            g2.dispose();
+        }
+    }
+
+    /** Glass-pane overlay that pops a "BAM!" comic burst over a target component. */
+    static class ComicBurst extends JComponent {
+        private static final String[] WORDS = {
+            "BAM!", "POW!", "WHAM!", "ZAP!", "BOOM!",
+            "KAPOW!", "ZOWIE!", "WHACK!", "ZING!", "BOOYAH!"
+        };
+        private static final int DURATION_MS = 850;
+
+        private final Random rand = new Random();
+        private boolean active = false;
+        private String word = "BAM!";
+        private float scale = 0f, alpha = 1f;
+        private double rotation = 0;
+        private long startTime;
+        private Timer timer;
+        private Point center = new Point(0, 0);
+
+        // ── Manga "panel zoom" transition state ────────────────────────────
+        private boolean panelMode = false;
+        private long panelStart;
+        private Point panelFocus = new Point(0, 0);
+        private float panelT = 0f;        // 0..1 progress
+        private boolean panelMidFired = false;
+        private Runnable panelMidCallback;
+        private Timer panelTimer;
+
+        ComicBurst() {
+            setOpaque(false);
+        }
+
+        /** Click-through: never block input even while visible. */
+        @Override public boolean contains(int x, int y) { return false; }
+
+        /**
+         * Manga "click into a panel" zoom: speed lines converge on `focus`,
+         * `onMid` fires at the midpoint (use it to swap screens), then the
+         * lines retract revealing the new panel.
+         */
+        void mangaPanelZoom(Point focus, Runnable onMid) {
+            panelFocus = focus != null ? focus : new Point(getWidth()/2, getHeight()/2);
+            panelStart = System.currentTimeMillis();
+            panelT = 0f;
+            panelMidFired = false;
+            panelMidCallback = onMid;
+            panelMode = true;
+            setVisible(true);
+            if (panelTimer != null) panelTimer.stop();
+            panelTimer = new Timer(16, e -> tickPanel((Timer) e.getSource()));
+            panelTimer.start();
+            repaint();
+        }
+
+        private void tickPanel(Timer self) {
+            long elapsed = System.currentTimeMillis() - panelStart;
+            float t = elapsed / 420f;   // total transition duration
+            panelT = Math.min(1f, t);
+            if (!panelMidFired && panelT >= 0.5f) {
+                panelMidFired = true;
+                if (panelMidCallback != null) panelMidCallback.run();
+            }
+            if (panelT >= 1f) {
+                panelMode = false;
+                self.stop();
+                if (!active) setVisible(false);
+                repaint();
+                return;
+            }
+            repaint();
+        }
+
+        /** Pop a random burst over `target` (in this glass pane's coords). */
+        void popOver(JComponent target) { popOverWith(null, target); }
+
+        /** Pop centered on the glass pane with a fixed word. */
+        void popHere(String fixedWord) { popOverWith(fixedWord, null); }
+
+        void popOverWith(String fixedWord, JComponent target) {
+            if (target != null && target.isShowing() && this.isShowing()) {
+                Point p = SwingUtilities.convertPoint(target,
+                    target.getWidth() / 2, target.getHeight() / 2, this);
+                center = p;
+            } else {
+                center = new Point(getWidth() / 2, getHeight() / 2);
+            }
+            word = (fixedWord != null) ? fixedWord : WORDS[rand.nextInt(WORDS.length)];
+            rotation = (rand.nextDouble() - 0.5) * 0.45;  // ±13°
+            startTime = System.currentTimeMillis();
+            scale = 0f;
+            alpha = 1f;
+            active = true;
+            setVisible(true);
+            if (timer != null) timer.stop();
+            timer = new Timer(16, e -> tick(((Timer) e.getSource())));
+            timer.start();
+            repaint();
+        }
+
+        private void tick(Timer self) {
+            long elapsed = System.currentTimeMillis() - startTime;
+            float t = elapsed / (float) DURATION_MS;
+            if (t >= 1f) {
+                active = false;
+                self.stop();
+                setVisible(false);
+                repaint();
+                return;
+            }
+            // Phase 1 (0–0.25): scale 0 → 1.25 (overshoot)
+            // Phase 2 (0.25–0.40): scale 1.25 → 1.0 (settle)
+            // Phase 3 (0.40–1.00): hold then fade alpha 1 → 0
+            if (t < 0.25f) {
+                scale = (t / 0.25f) * 1.25f;
+                alpha = 1f;
+            } else if (t < 0.40f) {
+                scale = 1.25f - ((t - 0.25f) / 0.15f) * 0.25f;
+                alpha = 1f;
+            } else {
+                scale = 1.0f;
+                alpha = 1f - ((t - 0.40f) / 0.60f);
+            }
+            repaint();
+        }
+
+        @Override protected void paintComponent(Graphics g) {
+            if (!active && !panelMode) return;
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                                RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                                RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+            // ─ Manga panel-zoom: focus lines converge then retract ─────────
+            if (panelMode) {
+                paintPanelZoom((Graphics2D) g2.create());
+            }
+
+            if (!active) { g2.dispose(); return; }
+
+            float a = Math.max(0f, Math.min(1f, alpha));
+            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, a));
+
+            g2.translate(center.x, center.y);
+
+            // Action lines radiating outward (drawn before scale/rotate so they always feel big)
+            g2.setColor(INK);
+            g2.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            for (int i = 0; i < 12; i++) {
+                double ang = i * (Math.PI / 6) + rotation;
+                int r1 = (int) (160 * scale);
+                int r2 = (int) (210 * scale);
+                int x1 = (int) (Math.cos(ang) * r1);
+                int y1 = (int) (Math.sin(ang) * r1);
+                int x2 = (int) (Math.cos(ang) * r2);
+                int y2 = (int) (Math.sin(ang) * r2);
+                g2.drawLine(x1, y1, x2, y2);
+            }
+
+            g2.rotate(rotation);
+            g2.scale(scale, scale);
+
+            // Starburst polygon — alternating long/short points
+            int spikes = 14;
+            double rOuter = 150, rInner = 95;
+            Path2D star = new Path2D.Double();
+            for (int i = 0; i < spikes * 2; i++) {
+                double ang = i * Math.PI / spikes - Math.PI / 2;
+                double r = (i % 2 == 0) ? rOuter : rInner;
+                double x = Math.cos(ang) * r;
+                double y = Math.sin(ang) * r;
+                if (i == 0) star.moveTo(x, y); else star.lineTo(x, y);
+            }
+            star.closePath();
+
+            // Fill yellow, ink outline
+            g2.setColor(BURST_FILL);
+            g2.fill(star);
+            g2.setColor(INK);
+            g2.setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.draw(star);
+
+            // Inner highlight ring
+            g2.setColor(new Color(255, 255, 255, 90));
+            g2.setStroke(new BasicStroke(3f));
+            g2.draw(new Ellipse2D.Double(-70, -60, 50, 28));
+
+            // Big chunky text — ink outline + red fill
+            Font f = new Font(COMIC_FONT, Font.BOLD, 60);
+            FontRenderContext frc = g2.getFontRenderContext();
+            TextLayout tl = new TextLayout(word, f, frc);
+            Rectangle2D b = tl.getBounds();
+            AffineTransform at = AffineTransform.getTranslateInstance(
+                -b.getWidth() / 2 - b.getX(),
+                b.getHeight() / 2 - b.getY() - b.getHeight() / 2);
+            Shape outline = tl.getOutline(at);
+            g2.setColor(INK);
+            g2.setStroke(new BasicStroke(8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.draw(outline);
+            g2.setColor(BURST_TEXT);
+            g2.fill(outline);
+
+            g2.dispose();
+        }
+
+        /** Manga focus-line transition. closeT goes 0→1→0 over the animation. */
+        private void paintPanelZoom(Graphics2D g2) {
+            int w = getWidth(), h = getHeight();
+            int maxR = (int) Math.hypot(w, h);
+            float closeT = panelT < 0.5f ? (panelT * 2f) : (1f - (panelT - 0.5f) * 2f);
+
+            // soft paper-white wash that grows then fades — sells the "zoom in" feel
+            g2.setColor(new Color(245, 241, 232, Math.round(closeT * 0.30f * 255)));
+            g2.fillRect(0, 0, w, h);
+
+            int innerR = (int) (maxR * (1f - closeT) * 0.55f) + 40;
+            int outerR = maxR;
+            int lineCount = 42;
+            float thickness = 2.5f + closeT * 1.5f;
+            g2.setColor(INK);
+            g2.setStroke(new BasicStroke(thickness, BasicStroke.CAP_ROUND,
+                                         BasicStroke.JOIN_ROUND));
+            for (int i = 0; i < lineCount; i++) {
+                double ang = i * 2 * Math.PI / lineCount;
+                int x1 = panelFocus.x + (int) (Math.cos(ang) * innerR);
+                int y1 = panelFocus.y + (int) (Math.sin(ang) * innerR);
+                int x2 = panelFocus.x + (int) (Math.cos(ang) * outerR);
+                int y2 = panelFocus.y + (int) (Math.sin(ang) * outerR);
+                g2.drawLine(x1, y1, x2, y2);
+            }
+            g2.dispose();
+        }
+    }
+
+    /** Solid paper background overlaid with a halftone dot pattern (manga style). */
+    static class GradientPanel extends JPanel {
+        private final Color paper;
+        private final TexturePaint halftone;
+        GradientPanel(Color paper, Color dotColor) {
+            this.paper = paper;
+            this.halftone = makeHalftone(dotColor);
+            setOpaque(true);
+        }
+        private static TexturePaint makeHalftone(Color dot) {
+            int size = 12;
+            BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2 = img.createGraphics();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                                RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(dot);
+            g2.fillOval(size / 2 - 2, size / 2 - 2, 3, 3);
+            g2.dispose();
+            return new TexturePaint(img, new Rectangle(0, 0, size, size));
+        }
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setColor(paper);
             g2.fillRect(0, 0, getWidth(), getHeight());
+            g2.setPaint(halftone);
+            g2.fillRect(0, 0, getWidth(), getHeight());
+            g2.dispose();
         }
     }
 
